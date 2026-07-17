@@ -14,6 +14,20 @@ impl IfConfiguerTrait for MacIfConfiger {
         cidr_prefix: u8,
         cost: Option<i32>,
     ) -> Result<(), Error> {
+        // Delete any existing route for this destination first. macOS/FreeBSD
+        // will reject "route add" with "File exists" if the destination already
+        // has a route (e.g. from a previously-created TUN device). Ignore errors
+        // since the route may not exist yet.
+        let _ = run_shell_cmd(
+            format!(
+                "route -n delete {} -netmask {}",
+                address,
+                cidr_to_subnet_mask(cidr_prefix),
+            )
+            .as_str(),
+        )
+        .await;
+
         run_shell_cmd(
             format!(
                 "route -n add {} -netmask {} -interface {} -hopcount {}",
@@ -104,6 +118,13 @@ impl IfConfiguerTrait for MacIfConfiger {
         cidr_prefix: u8,
         cost: Option<i32>,
     ) -> Result<(), Error> {
+        // Delete any existing route for this destination first (same rationale
+        // as add_ipv4_route).
+        let _ = run_shell_cmd(
+            format!("route -n delete -inet6 {}/{}", address, cidr_prefix).as_str(),
+        )
+        .await;
+
         let cmd = if let Some(cost) = cost {
             format!(
                 "route -n add -inet6 {}/{} -interface {} -hopcount {}",

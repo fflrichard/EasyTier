@@ -1227,8 +1227,12 @@ impl PeerManager {
                         return None;
                     }
                     tracing::trace!(?packet, "send packet to nic channel");
-                    // TODO: use a function to get the body ref directly for zero copy
-                    let _ = self.nic_channel.send(packet).await;
+                    // Use try_send to avoid blocking the entire recv pipeline
+                    // when the TUN write path is congested. Dropped packets
+                    // will be retransmitted by TCP / handled by the application.
+                    if self.nic_channel.try_send(packet).is_err() {
+                        tracing::debug!("nic_channel full or closed, dropping packet to prevent pipeline blockage");
+                    }
                     None
                 } else {
                     Some(packet)

@@ -5,6 +5,7 @@ use std::{
     pin::Pin,
     sync::{Arc, Weak},
     task::{Context, Poll},
+    time::Duration,
 };
 
 use crate::{
@@ -1004,9 +1005,16 @@ impl NicCtx {
                     "[USER_PACKET] forward packet from peers to nic. packet: {:?}",
                     packet
                 );
-                let ret = sink.send(packet).await;
-                if ret.is_err() {
-                    tracing::error!(?ret, "do_forward_tunnel_to_nic sink error");
+                // Add timeout to prevent indefinite blocking when the TUN
+                // device's kernel buffer is full (e.g. on macOS where utun
+                // may block if O_NONBLOCK is not properly set).
+                let ret = tokio::time::timeout(Duration::from_secs(5), sink.send(packet)).await;
+                match ret {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => tracing::error!(?e, "do_forward_tunnel_to_nic sink error"),
+                    Err(_elapsed) => {
+                        tracing::warn!("do_forward_tunnel_to_nic sink send timed out after 5s");
+                    }
                 }
             }
             close_notifier.notify_one();
